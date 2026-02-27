@@ -176,6 +176,26 @@ class TestRLTradingAgent:
         agent.refresh_hyperparams()
         assert agent.config.gamma == pytest.approx(0.77)
 
+    def test_structural_params_not_changed_by_refresh(self):
+        """lookback_bars / hidden_size / timeframes must not be modified after init."""
+        db = HyperparamDB()
+        agent = RLTradingAgent(
+            config=RLConfig(timeframes=["1h"], lookback_bars=10, hidden_size=64),
+            db=db,
+        )
+        original_input_dim = agent._online_net.input_dim
+        # Attempt to change all three structural params via the DB.
+        db.set("lookback_bars", 999)
+        db.set("hidden_size", 512)
+        db.set("timeframes", ["1h", "4h", "1d", "1w"])
+        agent.refresh_hyperparams()
+        # Config structural fields must remain unchanged.
+        assert agent.config.lookback_bars == 10
+        assert agent.config.hidden_size == 64
+        assert agent.config.timeframes == ["1h"]
+        # Network dimensions must still match original.
+        assert agent._online_net.input_dim == original_input_dim
+
     def test_save_and_load_checkpoint(self):
         db = HyperparamDB()
         agent1 = RLTradingAgent(config=RLConfig(timeframes=["1h"], lookback_bars=10, batch_size=4))

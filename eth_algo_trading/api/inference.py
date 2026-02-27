@@ -137,8 +137,15 @@ def _parse_ohlcv_records(records: List[Dict[str, Any]]) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    numeric_cols = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
-    if numeric_cols and df[numeric_cols].isna().values.any():
+    _required = {"open", "high", "low", "close", "volume"}
+    missing = _required - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"OHLCV records are missing required columns: {sorted(missing)}"
+        )
+
+    numeric_cols = ["open", "high", "low", "close", "volume"]
+    if df[numeric_cols].isna().values.any():
         raise ValueError(
             "Invalid numeric values in OHLCV records: 'open', 'high', 'low', "
             "'close', and 'volume' must all be valid numbers."

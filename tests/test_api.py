@@ -84,6 +84,14 @@ class TestParseOhlcvRecords:
             with pytest.raises(ValueError, match="Invalid numeric values"):
                 _parse_ohlcv_records(records)
 
+    def test_missing_required_column_raises_error(self):
+        for missing_col in ["open", "high", "low", "close", "volume"]:
+            records = _make_records(5)
+            for r in records:
+                del r[missing_col]
+            with pytest.raises(ValueError, match="missing required columns"):
+                _parse_ohlcv_records(records)
+
 
 # ---------------------------------------------------------------------------
 # Payload parsing tests

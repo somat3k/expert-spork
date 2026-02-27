@@ -343,14 +343,26 @@ class RLTradingAgent:
     # Hyperparameter management
     # ------------------------------------------------------------------
 
+    # Parameters that determine network input/hidden dimensions; changing them
+    # after the networks are built would silently corrupt the agent.
+    _STRUCTURAL_PARAMS: frozenset = frozenset({"lookback_bars", "hidden_size", "timeframes"})
+
     def _apply_db_hyperparams(self) -> None:
-        """Override *_cfg* fields with any values stored in the database."""
+        """
+        Override *_cfg* fields with any values stored in the database.
+
+        Structural parameters (``lookback_bars``, ``hidden_size``,
+        ``timeframes``) are intentionally skipped to prevent the network
+        architecture from becoming inconsistent with the already-initialised
+        weight tensors.  These values can only be changed by constructing a
+        new agent.
+        """
         if self._db is None:
             return
         stored = self._db.load_all()
         cfg_dict = asdict(self._cfg)
         for key, val in stored.items():
-            if key in cfg_dict:
+            if key in cfg_dict and key not in self._STRUCTURAL_PARAMS:
                 setattr(self._cfg, key, val)
 
     def refresh_hyperparams(self) -> None:
