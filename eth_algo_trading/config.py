@@ -56,7 +56,6 @@ class ModelConfig:
     anomaly_contamination: float = 0.05  # expected fraction of anomalies
     sentiment_model: str = "ProsusAI/finbert"
 
-
 @dataclass
 class TradingConfig:
     """Top-level trading configuration."""
