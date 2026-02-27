@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, NamedTuple, Optional, Tuple
+from typing import Deque, NamedTuple, Optional
 
 
 class _Outcome(NamedTuple):
