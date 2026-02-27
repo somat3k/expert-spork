@@ -66,8 +66,16 @@ class MultiplexStrategy(BaseStrategy):
             raise ValueError("At least one child strategy is required.")
         self.strategies = strategies
         self.forecaster = forecaster
-        self.forecaster_weight = float(max(0.0, min(1.0, forecaster_weight)))
-        self.min_consensus = float(max(0.0, min(1.0, min_consensus)))
+        if not 0.0 <= forecaster_weight <= 1.0:
+            raise ValueError(
+                f"forecaster_weight must be in [0.0, 1.0], got {forecaster_weight!r}"
+            )
+        if not 0.0 <= min_consensus <= 1.0:
+            raise ValueError(
+                f"min_consensus must be in [0.0, 1.0], got {min_consensus!r}"
+            )
+        self.forecaster_weight = float(forecaster_weight)
+        self.min_consensus = float(min_consensus)
 
     # ------------------------------------------------------------------
     # Golden-ratio weight helpers
@@ -131,7 +139,7 @@ class MultiplexStrategy(BaseStrategy):
 
         abs_vote = abs(vote)
 
-        if abs_vote < self.min_consensus:
+        if abs_vote <= self.min_consensus:
             return Signal(
                 direction="flat",
                 strength=0.0,

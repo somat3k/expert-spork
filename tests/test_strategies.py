@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from eth_algo_trading.strategies.base import Signal
+from eth_algo_trading.strategies.base import BaseStrategy, Signal
 from eth_algo_trading.strategies.scalping import ScalpingStrategy
 from eth_algo_trading.strategies.arbitrage import ArbitrageStrategy
 from eth_algo_trading.strategies.trend_following import TrendFollowingStrategy
@@ -221,6 +221,28 @@ class TestMultiplexStrategy:
         with pytest.raises(ValueError, match="At least one"):
             MultiplexStrategy(strategies=[])
 
+    def test_invalid_forecaster_weight_raises(self):
+        with pytest.raises(ValueError, match="forecaster_weight"):
+            MultiplexStrategy(strategies=[ScalpingStrategy()], forecaster_weight=1.5)
+
+    def test_invalid_min_consensus_raises(self):
+        with pytest.raises(ValueError, match="min_consensus"):
+            MultiplexStrategy(strategies=[ScalpingStrategy()], min_consensus=-0.1)
+
+    def test_zero_vote_emits_flat(self):
+        """A perfectly balanced vote (== 0.0) must produce flat, not short."""
+
+        class _ZeroSignalStrategy(BaseStrategy):
+            def generate_signal(self, ohlcv, features=None):
+                return Signal(direction="flat", strength=0.0, strategy=self.name)
+
+        strat = MultiplexStrategy(
+            strategies=[_ZeroSignalStrategy("zero")],
+            min_consensus=0.0,
+        )
+        signal = strat.generate_signal(_make_ohlcv(5))
+        assert signal.direction == "flat"
+
     def test_returns_signal_instance(self):
         strat = MultiplexStrategy(
             strategies=[ScalpingStrategy(), TrendFollowingStrategy()],
@@ -247,7 +269,7 @@ class TestMultiplexStrategy:
     def test_flat_when_consensus_not_met(self):
         strat = MultiplexStrategy(
             strategies=[ScalpingStrategy(rsi_period=14)],
-            min_consensus=1.0,  # unreachable threshold → always flat
+            min_consensus=1.0,  # child returns flat on insufficient bars; keeps aggregate flat too
         )
         signal = strat.generate_signal(_make_ohlcv(5))
         assert signal.direction == "flat"
@@ -265,12 +287,13 @@ class TestMultiplexStrategy:
         assert abs(weights.sum() - 1.0) < 1e-9
 
     def test_golden_weights_decay_by_phi(self):
+        phi = (1.0 + 5.0 ** 0.5) / 2.0  # golden ratio ≈ 1.618
         weights = MultiplexStrategy._golden_weights(3)
         # Each consecutive weight should be ~1/φ of the previous one
         ratio_01 = weights[0] / weights[1]
         ratio_12 = weights[1] / weights[2]
-        assert abs(ratio_01 - _PHI) < 1e-9
-        assert abs(ratio_12 - _PHI) < 1e-9
+        assert abs(ratio_01 - phi) < 1e-9
+        assert abs(ratio_12 - phi) < 1e-9
 
     def test_golden_weights_empty(self):
         weights = MultiplexStrategy._golden_weights(0)
