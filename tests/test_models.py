@@ -270,7 +270,8 @@ class TestAnomalyDetectorAdaptive:
         for _ in range(10):
             detector.predict(features)
             detector.record_outcome(True)
-        assert detector.contamination > initial_contamination
+        expected = initial_contamination + cfg.contamination_step
+        assert abs(detector.contamination - expected) < 1e-9
 
     def test_adapt_no_change_without_history(self):
         detector = AnomalyDetector(contamination=0.05)
