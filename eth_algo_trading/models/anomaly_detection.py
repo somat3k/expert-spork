@@ -111,10 +111,11 @@ class AnomalyDetector:
         if self._last_prediction is None:
             return
         actual = 1 if was_anomaly else 0
-        # Use the stored anomaly score as a meaningful confidence proxy:
-        # high score → confident it's anomalous; low score → confident it's normal.
+        # Use the stored anomaly score as a proxy for how confident the model
+        # was in its prediction: high score → confident it's anomalous;
+        # low score → confident it's normal.
         confidence = (
-            self._last_anomaly_score if was_anomaly
+            self._last_anomaly_score if self._last_prediction == 1
             else 1.0 - self._last_anomaly_score
         )
         self._tracker.record(
