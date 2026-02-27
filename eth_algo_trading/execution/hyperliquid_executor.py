@@ -365,6 +365,13 @@ class HyperliquidExecutor:
             )
 
         try:
+            if self.leverage != 1:
+                try:
+                    self._exchange.update_leverage(self.leverage, coin)
+                except Exception as lev_exc:  # SDK may raise various errors; log and proceed
+                    logger.warning(
+                        "Failed to set leverage %s for %s: %s", self.leverage, coin, lev_exc
+                    )
             response = self._exchange.market_open(coin, is_buy, size)
             logger.info("Order placed: %s", response)
             return HyperliquidOrderResult(
@@ -552,10 +559,28 @@ class HyperliquidExecutor:
         # 7. Close opposing position before reversing
         if current_pos > 0 and not is_long_signal:
             logger.info("Closing long position before shorting %s (size=%.6f).", coin, current_pos)
-            self._close_position(coin, mid_price, current_pos)
+            close_result = self._close_position(coin, mid_price, current_pos)
+            if close_result.status == "rejected":
+                logger.error(
+                    "Failed to close long position for %s before opening short; "
+                    "aborting reversal to avoid increasing exposure.",
+                    coin,
+                )
+                close_result.signal_direction = direction
+                close_result.signal_strength = strength
+                return close_result
         elif current_pos < 0 and is_long_signal:
             logger.info("Closing short position before going long %s (size=%.6f).", coin, abs(current_pos))
-            self._close_position(coin, mid_price, current_pos)
+            close_result = self._close_position(coin, mid_price, current_pos)
+            if close_result.status == "rejected":
+                logger.error(
+                    "Failed to close short position for %s before opening long; "
+                    "aborting reversal to avoid increasing exposure.",
+                    coin,
+                )
+                close_result.signal_direction = direction
+                close_result.signal_strength = strength
+                return close_result
         elif (current_pos > 0 and is_long_signal) or (current_pos < 0 and not is_long_signal):
             # Already positioned in the same direction – skip to avoid duplication
             logger.debug("Already positioned in %s direction for %s; skipping.", direction, coin)

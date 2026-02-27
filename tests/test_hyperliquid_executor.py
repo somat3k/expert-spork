@@ -379,6 +379,85 @@ class TestRunDecisionCycle:
         result = ex.run_decision_cycle("ETH", ohlcv, capital_usd=10_000.0)
         assert result.status == "skipped"
 
+    def test_no_duplicate_short(self):
+        """Should skip when already short and receiving another short signal."""
+        ex = self._executor()
+        ex._info.user_state.return_value = {
+            "marginSummary": {"accountValue": "10000.0"},
+            "assetPositions": [{"position": {"coin": "ETH", "szi": "-1.0"}}],
+        }
+        close = np.linspace(1200, 1000, 20)
+        idx = pd.date_range("2024-01-01", periods=20, freq="1h", tz="UTC")
+        ohlcv = pd.DataFrame(
+            {"open": close, "high": close, "low": close, "close": close, "volume": np.ones(20)},
+            index=idx,
+        )
+        result = ex.run_decision_cycle("ETH", ohlcv, capital_usd=10_000.0)
+        assert result.status == "skipped"
+
+    def test_close_long_before_open_short(self):
+        """When long and receiving a short signal, the long is closed and a short is opened."""
+        ex = self._executor()
+        ex._info.user_state.return_value = {
+            "marginSummary": {"accountValue": "10000.0"},
+            "assetPositions": [{"position": {"coin": "ETH", "szi": "1.0"}}],
+        }
+        close = np.linspace(1200, 1000, 20)
+        idx = pd.date_range("2024-01-01", periods=20, freq="1h", tz="UTC")
+        ohlcv = pd.DataFrame(
+            {"open": close, "high": close, "low": close, "close": close, "volume": np.ones(20)},
+            index=idx,
+        )
+        result = ex.run_decision_cycle("ETH", ohlcv, capital_usd=10_000.0)
+        # Paper close succeeds; new short order should be placed
+        assert result.status == "paper"
+        assert result.signal_direction == "short"
+        assert result.side == "sell"
+
+    def test_close_short_before_open_long(self):
+        """When short and receiving a long signal, the short is closed and a long is opened."""
+        ex = self._executor()
+        ex._info.user_state.return_value = {
+            "marginSummary": {"accountValue": "10000.0"},
+            "assetPositions": [{"position": {"coin": "ETH", "szi": "-1.0"}}],
+        }
+        close = np.linspace(1000, 1200, 20)
+        idx = pd.date_range("2024-01-01", periods=20, freq="1h", tz="UTC")
+        ohlcv = pd.DataFrame(
+            {"open": close, "high": close, "low": close, "close": close, "volume": np.ones(20)},
+            index=idx,
+        )
+        result = ex.run_decision_cycle("ETH", ohlcv, capital_usd=10_000.0)
+        # Paper close succeeds; new long order should be placed
+        assert result.status == "paper"
+        assert result.signal_direction == "long"
+        assert result.side == "buy"
+
+    def test_reversal_aborted_when_close_rejected(self):
+        """Position reversal must abort if the close call is rejected (live mode, no exchange)."""
+        with patch("eth_algo_trading.execution.hyperliquid_executor._SDK_AVAILABLE", False):
+            ex = HyperliquidExecutor(paper_trading=False)
+        mock_info = MagicMock()
+        mock_info.all_mids.return_value = {"ETH": "2000.0"}
+        mock_info.user_state.return_value = {
+            "marginSummary": {"accountValue": "10000.0"},
+            "assetPositions": [{"position": {"coin": "ETH", "szi": "1.0"}}],
+        }
+        ex._info = mock_info
+        ex.account_address = "0xABCD"
+
+        close = np.linspace(1200, 1000, 20)
+        idx = pd.date_range("2024-01-01", periods=20, freq="1h", tz="UTC")
+        ohlcv = pd.DataFrame(
+            {"open": close, "high": close, "low": close, "close": close, "volume": np.ones(20)},
+            index=idx,
+        )
+        result = ex.run_decision_cycle("ETH", ohlcv, capital_usd=10_000.0)
+        # Close is rejected (no exchange); should not proceed to open opposite side
+        assert result.status == "rejected"
+        assert result.signal_direction == "short"
+        assert 0.0 <= result.signal_strength <= 1.0
+
     def test_result_has_signal_metadata(self):
         ex = self._executor()
         close = np.linspace(1000, 1200, 20)
