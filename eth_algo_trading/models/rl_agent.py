@@ -490,7 +490,7 @@ class RLTradingAgent:
 
                 # Next state
                 next_window: Dict[str, pd.DataFrame] = self._aligned_tfs({
-                    tf: df.iloc[max(0, i - self._cfg.lookback_bars + 1): i + 2]
+                    tf: df.iloc[max(0, i - self._cfg.lookback_bars + 2): i + 2]
                     for tf, df in ohlcv_by_tf.items()
                 })
                 next_state = _build_state(next_window, self._cfg.lookback_bars)
