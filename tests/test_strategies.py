@@ -11,7 +11,7 @@ from eth_algo_trading.strategies.scalping import ScalpingStrategy
 from eth_algo_trading.strategies.arbitrage import ArbitrageStrategy
 from eth_algo_trading.strategies.trend_following import TrendFollowingStrategy
 from eth_algo_trading.strategies.sentiment import SentimentStrategy
-from eth_algo_trading.strategies.multiplex import MultiplexStrategy, _PHI
+from eth_algo_trading.strategies.multiplex import MultiplexStrategy
 
 
 # ---------------------------------------------------------------------------
