@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from eth_algo_trading.models.anomaly_detection import AnomalyDetector
+from eth_algo_trading.models.forecasting import PriceForecaster
 from eth_algo_trading.models.hyperparameter_tuner import AdaptiveConfig, PerformanceTracker
 from eth_algo_trading.models.regime_detection import RegimeDetector
 
@@ -253,12 +254,12 @@ class TestAnomalyDetectorAdaptive:
         detector.record_outcome(was_anomaly)  # correct outcome
         assert detector.rolling_accuracy == 1.0
 
-    def test_record_outcome_before_predict_is_noop(self):
+    def test_record_outcome_before_predict_raises(self):
         detector = AnomalyDetector()
         detector.fit(self._make_features())
-        # No predict called yet — record_outcome should not raise
-        detector.record_outcome(True)
-        assert detector.rolling_accuracy == 0.0
+        # No predict called yet — record_outcome should raise
+        with pytest.raises(RuntimeError, match="predict()"):
+            detector.record_outcome(True)
 
     def test_contamination_adjusts_toward_observed_rate(self):
         cfg = AdaptiveConfig(window=10, contamination_step=0.01)
@@ -266,15 +267,82 @@ class TestAnomalyDetectorAdaptive:
         features = self._make_features()
         detector.fit(features)
         initial_contamination = detector.contamination
-        # Simulate all outcomes being anomalous → observed_rate = 1.0 >> 0.05
-        for _ in range(10):
+        # Record exactly window//2 anomalous outcomes → triggers exactly one step
+        for _ in range(cfg.window // 2):
             detector.predict(features)
             detector.record_outcome(True)
         expected = initial_contamination + cfg.contamination_step
         assert abs(detector.contamination - expected) < 1e-9
+
+    def test_contamination_no_change_below_half_window(self):
+        cfg = AdaptiveConfig(window=10, contamination_step=0.01)
+        detector = AnomalyDetector(contamination=0.05, adaptive_config=cfg)
+        features = self._make_features()
+        detector.fit(features)
+        initial_contamination = detector.contamination
+        # Record window//2 - 1 outcomes → below the half-window guard, no change
+        for _ in range(cfg.window // 2 - 1):
+            detector.predict(features)
+            detector.record_outcome(True)
+        assert detector.contamination == initial_contamination
 
     def test_adapt_no_change_without_history(self):
         detector = AnomalyDetector(contamination=0.05)
         before = detector.contamination
         detector.adapt()
         assert detector.contamination == before
+
+
+# ---------------------------------------------------------------------------
+# PriceForecaster adaptive behaviour
+# ---------------------------------------------------------------------------
+
+class TestPriceForecasterAdaptive:
+    def test_rolling_accuracy_and_confidence_start_zero(self):
+        forecaster = PriceForecaster()
+        assert forecaster.rolling_accuracy == 0.0
+        assert forecaster.rolling_confidence == 0.0
+
+    def test_record_outcome_before_predict_raises(self):
+        forecaster = PriceForecaster()
+        with pytest.raises(RuntimeError, match="predict_proba()"):
+            forecaster.record_outcome(1)
+
+    def test_record_outcome_invalid_direction_raises(self):
+        forecaster = PriceForecaster()
+        # Simulate a prior prediction so the direction check is reached
+        forecaster._last_prediction = 1
+        forecaster._last_confidence = 0.7
+        with pytest.raises(ValueError, match="actual_direction"):
+            forecaster.record_outcome(5)
+
+    def test_adapt_increases_n_estimators_on_low_accuracy(self):
+        cfg = AdaptiveConfig(window=10, accuracy_target=0.6, estimators_step=25)
+        forecaster = PriceForecaster(n_estimators=200, adaptive_config=cfg)
+        # Populate the tracker directly: using predict_proba() + record_outcome()
+        # would require a fitted XGBoost model, which is an integration concern.
+        # Here we unit-test the adaptive logic in isolation.
+        for _ in range(10):
+            forecaster._tracker.record(predicted=0, actual=1, confidence=0.5)
+        forecaster.adapt()
+        assert forecaster.n_estimators == 225
+
+    def test_adapt_decreases_n_estimators_on_high_accuracy_and_confidence(self):
+        cfg = AdaptiveConfig(
+            window=10, accuracy_target=0.5, confidence_target=0.5, estimators_step=25
+        )
+        forecaster = PriceForecaster(n_estimators=200, adaptive_config=cfg)
+        # Populate the tracker directly (see note above).
+        for _ in range(10):
+            forecaster._tracker.record(predicted=1, actual=1, confidence=0.9)
+        forecaster.adapt()
+        assert forecaster.n_estimators == 175
+
+    def test_record_outcome_updates_rolling_accuracy(self):
+        cfg = AdaptiveConfig(window=10)
+        forecaster = PriceForecaster(adaptive_config=cfg)
+        # Simulate a correct prior prediction
+        forecaster._last_prediction = 2
+        forecaster._last_confidence = 0.8
+        forecaster.record_outcome(2)  # correct
+        assert forecaster.rolling_accuracy == 1.0

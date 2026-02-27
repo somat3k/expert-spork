@@ -43,7 +43,7 @@ class AnomalyDetector:
         adaptive_config: Optional[AdaptiveConfig] = None,
     ) -> None:
         self.contamination = contamination
-        self._n_estimators = n_estimators
+        self.n_estimators = n_estimators
         self._model = IsolationForest(
             contamination=contamination,
             n_estimators=n_estimators,
@@ -51,13 +51,25 @@ class AnomalyDetector:
         )
         self._is_fitted = False
         self._tracker = PerformanceTracker(adaptive_config)
-        # Track whether the last prediction was anomalous (1) or normal (0)
-        # and the associated anomaly score (used as a confidence proxy).
+        # Note: these two attributes are NOT thread-safe. Callers must ensure
+        # that predict() and record_outcome() are invoked sequentially.
         self._last_prediction: Optional[int] = None
         self._last_anomaly_score: float = 0.0
 
     def fit(self, features: pd.DataFrame) -> "AnomalyDetector":
-        """Train the Isolation Forest on historical feature data."""
+        """
+        Train the Isolation Forest on historical feature data.
+
+        Recreates the underlying model using the current values of
+        ``contamination`` and ``n_estimators``, so any changes made by
+        :meth:`adapt` are picked up automatically on the next call to
+        this method.
+        """
+        self._model = IsolationForest(
+            contamination=self.contamination,
+            n_estimators=self.n_estimators,
+            random_state=42,
+        )
         self._model.fit(features.fillna(0))
         self._is_fitted = True
         return self
@@ -107,9 +119,20 @@ class AnomalyDetector:
 
         After recording, :meth:`adapt` is automatically called to keep
         ``contamination`` aligned with the empirical anomaly rate.
+
+        Raises
+        ------
+        RuntimeError
+            If called before any prediction has been made (i.e. :meth:`predict`
+            has not been called yet so there is no stored prediction to attach
+            this outcome to).
         """
         if self._last_prediction is None:
-            return
+            raise RuntimeError(
+                "record_outcome() called before any prediction was made. "
+                "Call predict() first so there is a stored prediction to "
+                "attach this outcome to."
+            )
         actual = 1 if was_anomaly else 0
         # Use the stored anomaly score as a proxy for how confident the model
         # was in its prediction: high score → confident it's anomalous;
@@ -131,8 +154,8 @@ class AnomalyDetector:
 
         The observed anomaly rate is the fraction of positive (anomalous)
         outcomes recorded in the tracker's window.  The new value is stored
-        on the instance; a retrain via :meth:`fit` is required to apply it
-        to the underlying Isolation Forest.
+        on the detector instance.  Call :meth:`fit` afterwards to recreate
+        the underlying Isolation Forest with the updated parameter.
         """
         actuals = self._tracker.get_actuals()
         if not actuals:

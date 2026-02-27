@@ -68,8 +68,9 @@ class PriceForecaster:
         self._model = None
         self._is_fitted = False
         self._tracker = PerformanceTracker(adaptive_config)
-        # Store the last prediction (class index 0/1/2) and its confidence
-        # so that record_outcome() can pair them with the actual result.
+        # Note: _last_prediction and _last_confidence are NOT thread-safe.
+        # Callers must ensure predict_proba() and record_outcome() are
+        # invoked sequentially.
         self._last_prediction: Optional[int] = None
         self._last_confidence: float = 0.0
 
@@ -150,9 +151,26 @@ class PriceForecaster:
 
         After recording, :meth:`adapt` is automatically called so that
         ``n_estimators`` stays calibrated to recent performance.
+
+        Raises
+        ------
+        ValueError
+            If ``actual_direction`` is not 0, 1, or 2.
+        RuntimeError
+            If called before any prediction has been made (i.e.
+            :meth:`predict_proba` has not been called yet so there is no
+            stored prediction to attach this outcome to).
         """
+        if actual_direction not in (0, 1, 2):
+            raise ValueError(
+                f"actual_direction must be 0, 1, or 2; got {actual_direction!r}."
+            )
         if self._last_prediction is None:
-            return
+            raise RuntimeError(
+                "record_outcome() called before any prediction was made. "
+                "Call predict_proba() first so there is a stored prediction "
+                "to attach this outcome to."
+            )
         self._tracker.record(
             predicted=self._last_prediction,
             actual=actual_direction,
@@ -164,8 +182,11 @@ class PriceForecaster:
         """
         Adjust ``n_estimators`` based on rolling accuracy and confidence.
 
-        The new value is stored on the instance.  On the next call to
-        :meth:`fit` the updated ``n_estimators`` will be used automatically.
+        The new value is stored on the instance and only affects *future*
+        calls to :meth:`fit`.  The currently fitted underlying model is not
+        modified by this method.  To make the adaptations take effect in
+        predictions, periodically retrain by calling :meth:`fit` with
+        updated data.
         """
         self.n_estimators = self._tracker.suggest_n_estimators(self.n_estimators)
 

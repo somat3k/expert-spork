@@ -127,6 +127,11 @@ class PerformanceTracker:
 
         No adjustment is made until at least half the tracking window is
         filled, to avoid premature tuning on a handful of samples.
+
+        .. note::
+            A minimum ``window`` of 10 is strongly recommended.  With very
+            small windows (e.g. 1–4) the half-window guard provides little
+            protection against noisy single-sample adaptations.
         """
         cfg = self._cfg
         if self.n_recorded < cfg.window // 2:
