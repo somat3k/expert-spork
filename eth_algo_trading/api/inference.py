@@ -328,7 +328,25 @@ def create_flask_app(
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 422
         except Exception as exc:
-            _logger.exception("Unhandled error during inference for payload %r", payload)
+            # Avoid logging full payloads (which may contain large or sensitive OHLCV data)
+            sanitized_payload = None
+            if isinstance(payload, dict):
+                timeframes = payload.get("timeframes") or {}
+                if isinstance(timeframes, dict):
+                    timeframe_keys = list(timeframes.keys())
+                else:
+                    timeframe_keys = None
+                sanitized_payload = {
+                    "symbol": payload.get("symbol"),
+                    "timeframes": timeframe_keys,
+                }
+            else:
+                sanitized_payload = {"payload_type": type(payload).__name__}
+
+            _logger.exception(
+                "Unhandled error during inference. Payload metadata: %r",
+                sanitized_payload,
+            )
             return jsonify({"error": "Internal inference error"}), 500
 
     return app
