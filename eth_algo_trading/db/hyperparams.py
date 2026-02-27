@@ -11,12 +11,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Any, Dict, Optional
+import threading
+from typing import Any, Dict, List, Optional
 
 
 class HyperparamDB:
     """
     Persistent key-value store for RL hyperparameters backed by SQLite.
+
+    Thread-safe: all database operations are serialised with a
+    :class:`threading.Lock`, and each thread obtains its own connection via
+    :class:`threading.local`.
 
     Parameters
     ----------
@@ -27,24 +32,44 @@ class HyperparamDB:
 
     def __init__(self, db_path: str = ":memory:") -> None:
         self.db_path = db_path
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        # RLock (reentrant) allows the same thread to re-acquire the lock,
+        # which is necessary because _init_schema() → _get_conn() → lock.
+        self._lock = threading.RLock()
+        self._local = threading.local()
+        # Track every thread-local connection so close_all() can clean up.
+        self._all_conns: List[sqlite3.Connection] = []
         self._init_schema()
+
+    # ------------------------------------------------------------------
+    # Connection management
+    # ------------------------------------------------------------------
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """Return a thread-local SQLite connection, creating one if needed."""
+        if not hasattr(self._local, "conn"):
+            conn = sqlite3.connect(self.db_path)
+            self._local.conn = conn
+            with self._lock:
+                self._all_conns.append(conn)
+        return self._local.conn
 
     # ------------------------------------------------------------------
     # Schema
     # ------------------------------------------------------------------
 
     def _init_schema(self) -> None:
-        with self._conn:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS hyperparams (
-                    key        TEXT PRIMARY KEY,
-                    value      TEXT NOT NULL,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        with self._lock:
+            conn = self._get_conn()
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS hyperparams (
+                        key        TEXT PRIMARY KEY,
+                        value      TEXT NOT NULL,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
                 )
-                """
-            )
 
     # ------------------------------------------------------------------
     # CRUD
@@ -52,38 +77,44 @@ class HyperparamDB:
 
     def set(self, key: str, value: Any) -> None:
         """Persist *value* (JSON-serialisable) under *key*."""
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO hyperparams (key, value, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(key) DO UPDATE
-                    SET value      = excluded.value,
-                        updated_at = CURRENT_TIMESTAMP
-                """,
-                (key, json.dumps(value)),
-            )
+        with self._lock:
+            conn = self._get_conn()
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO hyperparams (key, value, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(key) DO UPDATE
+                        SET value      = excluded.value,
+                            updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (key, json.dumps(value)),
+                )
 
     def get(self, key: str, default: Any = None) -> Any:
         """Return the stored value for *key*, or *default* if not found."""
-        row = self._conn.execute(
-            "SELECT value FROM hyperparams WHERE key = ?", (key,)
-        ).fetchone()
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT value FROM hyperparams WHERE key = ?", (key,)
+            ).fetchone()
         if row is None:
             return default
         return json.loads(row[0])
 
     def load_all(self) -> Dict[str, Any]:
         """Return all stored hyperparameters as a ``{key: value}`` dict."""
-        rows = self._conn.execute(
-            "SELECT key, value FROM hyperparams"
-        ).fetchall()
+        with self._lock:
+            rows = self._get_conn().execute(
+                "SELECT key, value FROM hyperparams"
+            ).fetchall()
         return {k: json.loads(v) for k, v in rows}
 
     def delete(self, key: str) -> None:
         """Remove *key* from the store (no-op if it doesn't exist)."""
-        with self._conn:
-            self._conn.execute("DELETE FROM hyperparams WHERE key = ?", (key,))
+        with self._lock:
+            conn = self._get_conn()
+            with conn:
+                conn.execute("DELETE FROM hyperparams WHERE key = ?", (key,))
 
     # ------------------------------------------------------------------
     # Model checkpoint helpers
@@ -91,35 +122,38 @@ class HyperparamDB:
 
     def save_blob(self, key: str, data: bytes) -> None:
         """Store raw *bytes* (e.g. a serialised PyTorch state-dict)."""
-        with self._conn:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS blobs (
-                    key        TEXT PRIMARY KEY,
-                    data       BLOB NOT NULL,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        with self._lock:
+            conn = self._get_conn()
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS blobs (
+                        key        TEXT PRIMARY KEY,
+                        data       BLOB NOT NULL,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
                 )
-                """
-            )
-            self._conn.execute(
-                """
-                INSERT INTO blobs (key, data, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(key) DO UPDATE
-                    SET data       = excluded.data,
-                        updated_at = CURRENT_TIMESTAMP
-                """,
-                (key, data),
-            )
+                conn.execute(
+                    """
+                    INSERT INTO blobs (key, data, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(key) DO UPDATE
+                        SET data       = excluded.data,
+                            updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (key, data),
+                )
 
     def load_blob(self, key: str) -> Optional[bytes]:
         """Return the raw bytes stored under *key*, or ``None``."""
-        try:
-            row = self._conn.execute(
-                "SELECT data FROM blobs WHERE key = ?", (key,)
-            ).fetchone()
-        except sqlite3.OperationalError:
-            return None
+        with self._lock:
+            try:
+                row = self._get_conn().execute(
+                    "SELECT data FROM blobs WHERE key = ?", (key,)
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return None
         if row is None:
             return None
         return bytes(row[0])
@@ -129,8 +163,27 @@ class HyperparamDB:
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        """Close the database connection."""
-        self._conn.close()
+        """Close the thread-local database connection, if open."""
+        if hasattr(self._local, "conn"):
+            self._local.conn.close()
+            del self._local.conn
+
+    def close_all(self) -> None:
+        """
+        Close all thread-local connections opened by any thread.
+
+        Call this during application shutdown to ensure no connections leak.
+        """
+        with self._lock:
+            for conn in self._all_conns:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._all_conns.clear()
+        # Also clear the calling thread's local reference.
+        if hasattr(self._local, "conn"):
+            del self._local.conn
 
     def __enter__(self) -> "HyperparamDB":
         return self

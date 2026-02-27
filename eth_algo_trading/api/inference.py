@@ -137,6 +137,13 @@ def _parse_ohlcv_records(records: List[Dict[str, Any]]) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    numeric_cols = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+    if numeric_cols and df[numeric_cols].isna().values.any():
+        raise ValueError(
+            "Invalid numeric values in OHLCV records: 'open', 'high', 'low', "
+            "'close', and 'volume' must all be valid numbers."
+        )
+
     return df
 
 
@@ -327,8 +334,15 @@ def create_flask_app(
             return jsonify(response.to_dict()), 200
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 422
-        except Exception as exc:
-            _logger.exception("Unhandled error during inference for payload %r", payload)
+        except Exception:
+            # Log only symbol and timeframe keys to avoid exposing large or
+            # potentially sensitive OHLCV data in production logs.
+            sanitized: Dict[str, Any] = {}
+            if isinstance(payload, dict):
+                sanitized["symbol"] = payload.get("symbol")
+                tfs = payload.get("timeframes")
+                sanitized["timeframes"] = list(tfs.keys()) if isinstance(tfs, dict) else None
+            _logger.exception("Unhandled error during inference. Payload metadata: %r", sanitized)
             return jsonify({"error": "Internal inference error"}), 500
 
     return app

@@ -10,6 +10,7 @@ from eth_algo_trading.config import RLConfig
 from eth_algo_trading.db.hyperparams import HyperparamDB
 from eth_algo_trading.models.rl_agent import (
     RLTradingAgent,
+    N_ACTIONS,
     _build_state,
     _state_dim,
 )
@@ -202,3 +203,22 @@ class TestRLTradingAgent:
         loss = agent.update()
         # loss should be a non-negative float (0.0 if torch not available)
         assert loss >= 0.0
+
+    def test_predict_batch(self):
+        agent = RLTradingAgent(config=RLConfig(lookback_bars=10))
+        dim = agent._online_net.input_dim
+        states = np.random.rand(5, dim).astype(np.float32)
+        q_batch = agent._online_net.predict_batch(states)
+        assert q_batch.shape == (5, N_ACTIONS)
+
+    def test_load_checkpoint_raises_on_arch_mismatch(self):
+        db = HyperparamDB()
+        # Save a checkpoint with one architecture
+        agent1 = RLTradingAgent(config=RLConfig(timeframes=["1h"], lookback_bars=10, batch_size=4))
+        agent1.fit({"1h": _make_ohlcv(30)}, n_episodes=1)
+        agent1.save_checkpoint(db)
+
+        # Attempt to load into an agent with a different architecture
+        agent2 = RLTradingAgent(config=RLConfig(timeframes=["1h"], lookback_bars=20))
+        with pytest.raises(ValueError, match="input_dim"):
+            agent2.load_checkpoint(db)

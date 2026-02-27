@@ -168,6 +168,28 @@ class _DQNetwork:
             t = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
             return self._net(t).squeeze(0).numpy()
 
+    def predict_batch(self, states: np.ndarray) -> np.ndarray:
+        """
+        Return Q-values for a batch of states as a ``(n, n_actions)`` array.
+
+        Parameters
+        ----------
+        states:
+            2-D float32 array of shape ``(n, input_dim)``.
+
+        Returns
+        -------
+        np.ndarray, shape ``(n, n_actions)``
+        """
+        if self._net is None:
+            return np.random.rand(len(states), self.n_actions).astype(np.float32)
+
+        import torch
+
+        with torch.no_grad():
+            t = torch.tensor(states, dtype=torch.float32)
+            return self._net(t).numpy()
+
     def train_step(
         self,
         states: np.ndarray,
@@ -409,11 +431,8 @@ class RLTradingAgent:
         rewards_arr = np.array(rewards, dtype=np.float32)
         dones_arr = np.array(dones, dtype=np.float32)
 
-        # Compute TD targets using the target network
-        next_q = np.max(
-            np.array([self._target_net.predict(s) for s in next_states_arr]),
-            axis=1,
-        )
+        # Compute TD targets using the target network (batched for efficiency)
+        next_q = np.max(self._target_net.predict_batch(next_states_arr), axis=1)
         targets = rewards_arr + self._cfg.gamma * next_q * (1.0 - dones_arr)
 
         loss = self._online_net.train_step(
@@ -443,11 +462,20 @@ class RLTradingAgent:
         to the signed next-bar return (positive for correct directional bets,
         negative otherwise), and stores the transitions for batch updates.
 
+        .. note::
+            Training uses only the primary timeframe (``config.timeframes[0]``)
+            for state construction.  Secondary timeframes in *ohlcv_by_tf* are
+            ignored during training because their integer indices do not
+            correspond to the same timestamps as the primary timeframe.
+            Multi-timeframe state vectors are only meaningful at inference time
+            when the caller provides pre-aligned DataFrames.
+
         Parameters
         ----------
         ohlcv_by_tf:
-            Dict mapping timeframe label → OHLCV DataFrame.  All DataFrames
-            should cover the same UTC period.
+            Dict mapping timeframe label → OHLCV DataFrame.  The primary
+            timeframe (``config.timeframes[0]``) must be present and have at
+            least ``lookback_bars + 1`` rows.
         n_episodes:
             Number of passes through the dataset.
 
@@ -470,10 +498,13 @@ class RLTradingAgent:
                 self.refresh_hyperparams()
 
             for i in range(self._cfg.lookback_bars, len(close_arr) - 1):
-                # Build state from a window ending at bar i
-                window: Dict[str, pd.DataFrame] = self._aligned_tfs({
-                    tf: df.iloc[max(0, i - self._cfg.lookback_bars): i + 1]
-                    for tf, df in ohlcv_by_tf.items()
+                # Build state from the primary TF window ending at bar i.
+                # Secondary TFs are excluded from training to avoid index
+                # misalignment (they have different bar counts for the same
+                # wall-clock period).
+                start = max(0, i - self._cfg.lookback_bars + 1)
+                window = self._aligned_tfs({
+                    primary_tf: primary.iloc[start: i + 1]
                 })
                 state = _build_state(window, self._cfg.lookback_bars)
 
@@ -488,10 +519,10 @@ class RLTradingAgent:
                 else:
                     reward = 0.0
 
-                # Next state
-                next_window: Dict[str, pd.DataFrame] = self._aligned_tfs({
-                    tf: df.iloc[max(0, i - self._cfg.lookback_bars + 2): i + 2]
-                    for tf, df in ohlcv_by_tf.items()
+                # Next state: one step further in the primary TF
+                next_start = max(0, i - self._cfg.lookback_bars + 2)
+                next_window = self._aligned_tfs({
+                    primary_tf: primary.iloc[next_start: i + 2]
                 })
                 next_state = _build_state(next_window, self._cfg.lookback_bars)
                 done = i + 2 >= len(close_arr)
@@ -572,6 +603,11 @@ class RLTradingAgent:
         target_db.save_blob("rl_online_weights", self._online_net.state_dict_bytes())
         target_db.save_blob("rl_target_weights", self._target_net.state_dict_bytes())
 
+        # Persist architecture metadata alongside weights so that
+        # load_checkpoint() can verify compatibility.
+        target_db.set("rl_arch_input_dim", self._online_net.input_dim)
+        target_db.set("rl_arch_hidden_size", self._online_net.hidden_size)
+
         # Persist current scalar hyperparameters
         cfg_dict = asdict(self._cfg)
         for key, val in cfg_dict.items():
@@ -581,6 +617,12 @@ class RLTradingAgent:
         """
         Restore model weights and hyperparameters from the database.
 
+        Raises
+        ------
+        ValueError
+            If the saved network architecture (``input_dim`` or
+            ``hidden_size``) does not match the current agent's configuration.
+
         Parameters
         ----------
         db:
@@ -589,6 +631,22 @@ class RLTradingAgent:
         source_db = db or self._db
         if source_db is None:
             return
+
+        # Validate architecture compatibility before loading weights.
+        saved_input_dim = source_db.get("rl_arch_input_dim")
+        saved_hidden_size = source_db.get("rl_arch_hidden_size")
+
+        if saved_input_dim is not None and saved_input_dim != self._online_net.input_dim:
+            raise ValueError(
+                f"Checkpoint input_dim {saved_input_dim} does not match current "
+                f"agent input_dim {self._online_net.input_dim}. "
+                "Ensure lookback_bars and timeframes match the saved configuration."
+            )
+        if saved_hidden_size is not None and saved_hidden_size != self._online_net.hidden_size:
+            raise ValueError(
+                f"Checkpoint hidden_size {saved_hidden_size} does not match current "
+                f"agent hidden_size {self._online_net.hidden_size}."
+            )
 
         self._apply_db_hyperparams()
 

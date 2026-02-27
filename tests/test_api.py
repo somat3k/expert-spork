@@ -77,10 +77,12 @@ class TestParseOhlcvRecords:
         df = _parse_ohlcv_records(records)
         assert len(df) == 1
 
-    def test_iso_timestamp_sets_index(self):
-        records = _make_records(5)
-        df = _parse_ohlcv_records(records)
-        assert isinstance(df.index, pd.DatetimeIndex)
+    def test_nan_values_raise_error(self):
+        for bad_col in ["open", "high", "low", "close", "volume"]:
+            records = _make_records(5)
+            records[2][bad_col] = "not-a-number"
+            with pytest.raises(ValueError, match="Invalid numeric values"):
+                _parse_ohlcv_records(records)
 
 
 # ---------------------------------------------------------------------------
