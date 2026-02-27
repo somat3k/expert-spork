@@ -311,9 +311,11 @@ class RLTradingAgent:
         self._cfg = config or RLConfig()
         self._db = db
 
-        # Optionally refresh hyperparameters from the database
+        # Optionally refresh hyperparameters from the database.
+        # Structural params (lookback_bars, hidden_size, timeframes) ARE applied
+        # here because the networks have not been built yet.
         if self._db is not None:
-            self._apply_db_hyperparams()
+            self._apply_db_hyperparams(skip_structural=False)
 
         self._step = 0
         self._is_fitted = False
@@ -347,22 +349,28 @@ class RLTradingAgent:
     # after the networks are built would silently corrupt the agent.
     _STRUCTURAL_PARAMS: frozenset = frozenset({"lookback_bars", "hidden_size", "timeframes"})
 
-    def _apply_db_hyperparams(self) -> None:
+    def _apply_db_hyperparams(self, *, skip_structural: bool = True) -> None:
         """
         Override *_cfg* fields with any values stored in the database.
 
-        Structural parameters (``lookback_bars``, ``hidden_size``,
-        ``timeframes``) are intentionally skipped to prevent the network
-        architecture from becoming inconsistent with the already-initialised
-        weight tensors.  These values can only be changed by constructing a
-        new agent.
+        Parameters
+        ----------
+        skip_structural:
+            When ``True`` (the default, used by :meth:`refresh_hyperparams`),
+            structural parameters (``lookback_bars``, ``hidden_size``,
+            ``timeframes``) are skipped to prevent the already-initialised
+            network weight tensors from becoming inconsistent with the config.
+            Pass ``False`` only during :meth:`__init__`, before the networks
+            are built, to allow DB values to fully override *config*.
         """
         if self._db is None:
             return
         stored = self._db.load_all()
         cfg_dict = asdict(self._cfg)
         for key, val in stored.items():
-            if key in cfg_dict and key not in self._STRUCTURAL_PARAMS:
+            if key in cfg_dict:
+                if skip_structural and key in self._STRUCTURAL_PARAMS:
+                    continue
                 setattr(self._cfg, key, val)
 
     def refresh_hyperparams(self) -> None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import uuid
 from typing import Any, Dict, List, Optional
 
 
@@ -38,6 +39,9 @@ class HyperparamDB:
         self._local = threading.local()
         # Track every thread-local connection so close_all() can clean up.
         self._all_conns: List[sqlite3.Connection] = []
+        # Unique name used to build a per-instance shared-cache URI when
+        # db_path is ':memory:', preventing collisions between instances.
+        self._instance_id: str = uuid.uuid4().hex
         self._init_schema()
 
     # ------------------------------------------------------------------
@@ -45,9 +49,22 @@ class HyperparamDB:
     # ------------------------------------------------------------------
 
     def _get_conn(self) -> sqlite3.Connection:
-        """Return a thread-local SQLite connection, creating one if needed."""
+        """Return a thread-local SQLite connection, creating one if needed.
+
+        When ``db_path`` is ``':memory:'``, a per-instance shared-cache URI
+        (``file:hyperparam_<id>?mode=memory&cache=shared``) is used so that
+        all threads accessing the **same** ``HyperparamDB`` instance share one
+        in-memory database.  ``check_same_thread`` is disabled because the
+        :class:`threading.RLock` already serialises all operations and
+        :meth:`close_all` must be able to close connections created in other
+        threads.
+        """
         if not hasattr(self._local, "conn"):
-            conn = sqlite3.connect(self.db_path)
+            if self.db_path == ":memory:":
+                uri = f"file:hyperparam_{self._instance_id}?mode=memory&cache=shared"
+                conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+            else:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._local.conn = conn
             with self._lock:
                 self._all_conns.append(conn)

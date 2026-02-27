@@ -94,6 +94,25 @@ class TestHyperparamDB:
         db.set("timeframes", ["1h", "4h", "1d"])
         assert db.get("timeframes") == ["1h", "4h", "1d"]
 
+    def test_memory_db_shared_across_threads(self):
+        """With ':memory:', writes from one thread must be visible to another."""
+        import threading
+
+        db = HyperparamDB()
+        db.set("gamma", 0.5)
+
+        results: dict[str, float] = {}
+
+        def reader() -> None:
+            results["gamma"] = db.get("gamma")
+            db.close()
+
+        t = threading.Thread(target=reader)
+        t.start()
+        t.join()
+
+        assert results["gamma"] == pytest.approx(0.5)
+
 
 # ---------------------------------------------------------------------------
 # Feature engineering tests
@@ -195,6 +214,17 @@ class TestRLTradingAgent:
         assert agent.config.timeframes == ["1h"]
         # Network dimensions must still match original.
         assert agent._online_net.input_dim == original_input_dim
+
+    def test_structural_params_applied_from_db_at_init(self):
+        """DB structural values must take effect when the agent is first constructed."""
+        db = HyperparamDB()
+        db.set("lookback_bars", 5)
+        db.set("hidden_size", 16)
+        agent = RLTradingAgent(config=RLConfig(timeframes=["1h"]), db=db)
+        assert agent.config.lookback_bars == 5
+        assert agent.config.hidden_size == 16
+        # Network must have been built using the DB-overridden dimensions.
+        assert agent._online_net.input_dim == _state_dim(1, 5)
 
     def test_save_and_load_checkpoint(self):
         db = HyperparamDB()
