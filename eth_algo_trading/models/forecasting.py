@@ -5,6 +5,11 @@ Uses gradient-boosted trees (XGBoost) trained on engineered features derived
 from OHLCV data and optional supplementary signals (funding rates, on-chain
 metrics, sentiment).  The model predicts the *direction* of the next
 ``forecast_horizon`` bars (up / down / flat).
+
+Supports dynamic hyperparameter adaptation: after each prediction is resolved,
+call ``record_outcome()`` with the actual direction and the model will
+automatically adjust ``n_estimators`` (and optionally retrain) based on its
+rolling accuracy and confidence.
 """
 
 from __future__ import annotations
@@ -13,6 +18,8 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+from eth_algo_trading.models.hyperparameter_tuner import AdaptiveConfig, PerformanceTracker
 
 
 def _make_features(ohlcv: pd.DataFrame, extra: Optional[pd.DataFrame] = None) -> pd.DataFrame:
@@ -45,13 +52,26 @@ class PriceForecaster:
         Number of bars ahead to forecast.
     n_estimators:
         Number of gradient-boosted trees.
+    adaptive_config:
+        Configuration for the dynamic hyperparameter tuner.  Pass
+        ``None`` (default) to use default :class:`AdaptiveConfig` values.
     """
 
-    def __init__(self, forecast_horizon: int = 12, n_estimators: int = 200) -> None:
+    def __init__(
+        self,
+        forecast_horizon: int = 12,
+        n_estimators: int = 200,
+        adaptive_config: Optional[AdaptiveConfig] = None,
+    ) -> None:
         self.forecast_horizon = forecast_horizon
         self.n_estimators = n_estimators
         self._model = None
         self._is_fitted = False
+        self._tracker = PerformanceTracker(adaptive_config)
+        # Store the last prediction (class index 0/1/2) and its confidence
+        # so that record_outcome() can pair them with the actual result.
+        self._last_prediction: Optional[int] = None
+        self._last_confidence: float = 0.0
 
     # ------------------------------------------------------------------
     # Training
@@ -109,7 +129,55 @@ class PriceForecaster:
             return (1 / 3, 1 / 3, 1 / 3)
 
         proba = self._model.predict_proba(X.iloc[[-1]])[0]
+        self._last_prediction = int(np.argmax(proba))
+        self._last_confidence = float(proba[self._last_prediction])
         return tuple(float(p) for p in proba)  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # Dynamic hyperparameter adaptation
+    # ------------------------------------------------------------------
+
+    def record_outcome(self, actual_direction: int) -> None:
+        """
+        Record the ground-truth outcome for the most recent prediction.
+
+        Parameters
+        ----------
+        actual_direction:
+            Actual direction class: 0 (down), 1 (flat), or 2 (up).
+            This is the same encoding used internally by the model and
+            returned as the argmax of ``predict_proba``.
+
+        After recording, :meth:`adapt` is automatically called so that
+        ``n_estimators`` stays calibrated to recent performance.
+        """
+        if self._last_prediction is None:
+            return
+        self._tracker.record(
+            predicted=self._last_prediction,
+            actual=actual_direction,
+            confidence=self._last_confidence,
+        )
+        self.adapt()
+
+    def adapt(self) -> None:
+        """
+        Adjust ``n_estimators`` based on rolling accuracy and confidence.
+
+        The new value is stored on the instance.  On the next call to
+        :meth:`fit` the updated ``n_estimators`` will be used automatically.
+        """
+        self.n_estimators = self._tracker.suggest_n_estimators(self.n_estimators)
+
+    @property
+    def rolling_accuracy(self) -> float:
+        """Rolling prediction accuracy over the tracker window."""
+        return self._tracker.rolling_accuracy()
+
+    @property
+    def rolling_confidence(self) -> float:
+        """Rolling mean confidence over the tracker window."""
+        return self._tracker.rolling_confidence()
 
     @property
     def is_fitted(self) -> bool:

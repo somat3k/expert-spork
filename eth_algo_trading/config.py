@@ -47,6 +47,14 @@ class ModelConfig:
     anomaly_contamination: float = 0.05  # expected fraction of anomalies
     sentiment_model: str = "ProsusAI/finbert"
 
+    # Dynamic hyperparameter adaptation settings
+    adaptive_window: int = 50            # rolling window for accuracy tracking
+    adaptive_accuracy_target: float = 0.55  # accuracy below this triggers n_estimators increase
+    adaptive_confidence_target: float = 0.50  # confidence below this widens adaptation range
+    adaptive_estimators_step: int = 25   # step size for n_estimators adjustment
+    adaptive_estimators_min: int = 50    # minimum n_estimators
+    adaptive_estimators_max: int = 600   # maximum n_estimators
+
 
 @dataclass
 class TradingConfig:
