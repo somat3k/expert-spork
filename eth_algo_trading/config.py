@@ -18,6 +18,15 @@ load_dotenv()
 
 
 @dataclass
+class HyperliquidConfig:
+    """Credentials and endpoint settings for Hyperliquid."""
+
+    account_address: str = field(default_factory=lambda: os.getenv("HL_ACCOUNT_ADDRESS", ""))
+    private_key: str = field(default_factory=lambda: os.getenv("HL_PRIVATE_KEY", ""))
+    testnet: bool = True
+
+
+@dataclass
 class ExchangeConfig:
     """Credentials and settings for a single exchange connection."""
 
@@ -57,6 +66,7 @@ class TradingConfig:
     exchanges: List[ExchangeConfig] = field(default_factory=list)
     risk: RiskConfig = field(default_factory=RiskConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
+    hyperliquid: HyperliquidConfig = field(default_factory=HyperliquidConfig)
     paper_trading: bool = True
 
     @classmethod
