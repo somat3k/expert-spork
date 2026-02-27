@@ -164,9 +164,18 @@ class HyperparamDB:
 
     def close(self) -> None:
         """Close the thread-local database connection, if open."""
-        if hasattr(self._local, "conn"):
-            self._local.conn.close()
-            del self._local.conn
+        with self._lock:
+            conn = getattr(self._local, "conn", None)
+            if conn is not None:
+                # Remove from global connection tracking to avoid retaining
+                # references to closed connections in long-running processes.
+                try:
+                    self._all_conns.remove(conn)
+                except ValueError:
+                    # If the connection is not in the list, ignore.
+                    pass
+                conn.close()
+                del self._local.conn
 
     def close_all(self) -> None:
         """
