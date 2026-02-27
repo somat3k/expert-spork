@@ -11,6 +11,7 @@ setup(
         "pandas>=2.0.0",
         "scikit-learn>=1.3.0",
         "xgboost>=2.0.0",
+        "hmmlearn>=0.3.0",
         "torch>=2.0.0",
         "transformers>=4.35.0",
         "ccxt>=4.0.0",
