@@ -245,11 +245,7 @@ class InferenceEngine:
             self._agent = agent
         else:
             config = RLConfig()
-            if db is not None:
-                stored = db.load_all()
-                for key, val in stored.items():
-                    if hasattr(config, key):
-                        setattr(config, key, val)
+            # Let RLTradingAgent handle any DB-based overrides to the config
             self._agent = RLTradingAgent(config=config, db=db)
 
     def run(self, payload: Dict[str, Any]) -> InferenceResponse:
