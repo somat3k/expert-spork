@@ -49,6 +49,31 @@ class ModelConfig:
 
 
 @dataclass
+class RLConfig:
+    """Hyperparameters for the reinforcement learning trading agent."""
+
+    timeframes: List[str] = field(default_factory=lambda: ["1h", "4h", "1d"])
+    lookback_bars: int = 50           # bars of history per timeframe for state
+    gamma: float = 0.99               # discount factor
+    learning_rate: float = 1e-3       # Adam optimizer learning rate
+    epsilon_start: float = 1.0        # initial exploration rate (epsilon-greedy)
+    epsilon_end: float = 0.05         # minimum exploration rate
+    epsilon_decay: int = 1000         # steps over which epsilon decays linearly
+    batch_size: int = 64              # mini-batch size for replay training
+    replay_capacity: int = 10_000     # maximum transitions in replay buffer
+    target_update_freq: int = 100     # steps between target-network syncs
+    hidden_size: int = 128            # neurons per hidden layer in Q-network
+    db_path: str = ":memory:"         # SQLite path for dynamic hyperparam store
+
+
+@dataclass
+class DatabaseConfig:
+    """Configuration for the hyperparameter persistence database."""
+
+    db_path: str = ":memory:"         # ':memory:' for in-process, or a file path
+
+
+@dataclass
 class TradingConfig:
     """Top-level trading configuration."""
 
@@ -57,6 +82,8 @@ class TradingConfig:
     exchanges: List[ExchangeConfig] = field(default_factory=list)
     risk: RiskConfig = field(default_factory=RiskConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
+    rl: RLConfig = field(default_factory=RLConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
     paper_trading: bool = True
 
     @classmethod
