@@ -410,10 +410,16 @@ class RLTradingAgent:
         dones_arr = np.array(dones, dtype=np.float32)
 
         # Compute TD targets using the target network
-        next_q = np.max(
-            np.array([self._target_net.predict(s) for s in next_states_arr]),
-            axis=1,
-        )
+        # Prefer a batched prediction API if available, fall back to per-state calls.
+        if hasattr(self._target_net, "predict_batch"):
+            next_q_values = self._target_net.predict_batch(next_states_arr)
+        else:
+            next_q_values = np.array(
+                [self._target_net.predict(s) for s in next_states_arr],
+                dtype=np.float32,
+            )
+
+        next_q = np.max(next_q_values, axis=1)
         targets = rewards_arr + self._cfg.gamma * next_q * (1.0 - dones_arr)
 
         loss = self._online_net.train_step(
