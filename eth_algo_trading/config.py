@@ -63,7 +63,6 @@ class RLConfig:
     replay_capacity: int = 10_000     # maximum transitions in replay buffer
     target_update_freq: int = 100     # steps between target-network syncs
     hidden_size: int = 128            # neurons per hidden layer in Q-network
-    db_path: str = ":memory:"         # SQLite path for dynamic hyperparam store
 
 
 @dataclass
