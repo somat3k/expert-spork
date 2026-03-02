@@ -201,7 +201,8 @@ def _generate_alerts(signal: Signal, symbol: str) -> List[Alert]:
     short_q = q_vals.get("short", 0.0)
 
     # Alert if flat wins by a very small margin (uncertain market)
-    if direction == "flat" and abs(long_q - short_q) < 0.05:
+    second_best_q = max(long_q, short_q)
+    if direction == "flat" and flat_q >= second_best_q and (flat_q - second_best_q) < 0.05:
         alerts.append(
             Alert(
                 type="info",
