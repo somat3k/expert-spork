@@ -17,7 +17,6 @@ from eth_algo_trading.api.inference import (
     _parse_ohlcv_records,
     _parse_payload,
 )
-from eth_algo_trading.config import RLConfig
 from eth_algo_trading.db.hyperparams import HyperparamDB
 from eth_algo_trading.strategies.base import Signal
 

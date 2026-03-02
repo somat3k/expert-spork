@@ -508,7 +508,7 @@ class RLTradingAgent:
         RLTradingAgent
             self (for chaining).
         """
-        # Use the shortest timeframe as the step driver
+        # Use the first configured timeframe (primary_tf) as the step driver
         if not self._cfg.timeframes:
             raise ValueError(
                 "RLTradingAgent.fit() requires at least one entry in "

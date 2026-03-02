@@ -47,7 +47,6 @@ import logging
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 from eth_algo_trading.config import RLConfig
