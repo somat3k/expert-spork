@@ -242,7 +242,15 @@ class InferenceEngine:
     ) -> None:
         self._db = db
         if agent is not None:
+            # Use the provided agent instance.
             self._agent = agent
+            # If a DB is provided to the engine, try to associate it with the
+            # agent so that subsequent hyperparameter refreshes use it.
+            if db is not None:
+                if hasattr(self._agent, "db"):
+                    setattr(self._agent, "db", db)
+                elif hasattr(self._agent, "_db"):
+                    setattr(self._agent, "_db", db)
         else:
             config = RLConfig()
             # Let RLTradingAgent handle any DB-based overrides to the config
