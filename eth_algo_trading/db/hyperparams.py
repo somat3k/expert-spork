@@ -21,7 +21,7 @@ class HyperparamDB:
     Persistent key-value store for RL hyperparameters backed by SQLite.
 
     Thread-safe: all database operations are serialised with a
-    :class:`threading.Lock`, and each thread obtains its own connection via
+    :class:`threading.RLock`, and each thread obtains its own connection via
     :class:`threading.local`.
 
     Parameters

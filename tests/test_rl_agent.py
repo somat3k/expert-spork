@@ -251,7 +251,7 @@ class TestRLTradingAgent:
             ns = np.random.rand(dim).astype(np.float32)
             agent.store_experience(s, 0, 0.1, ns, False)
         loss = agent.update()
-        # loss should be a non-negative float (0.0 if torch not available)
+        # loss should be a non-negative float
         assert loss >= 0.0
 
     def test_predict_batch(self):

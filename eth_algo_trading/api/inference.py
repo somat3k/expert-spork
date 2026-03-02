@@ -261,6 +261,10 @@ class InferenceEngine:
         -------
         InferenceResponse
         """
+        # Pick up any hyperparameter updates written to the DB since last call.
+        if self._db is not None:
+            self._agent.refresh_hyperparams()
+
         request = _parse_payload(payload)
 
         signal = self._agent.predict(request.ohlcv_by_tf)

@@ -129,8 +129,9 @@ class _DQNetwork:
     """
     Two-layer MLP Q-network implemented with PyTorch.
 
-    Falls back gracefully when ``torch`` is unavailable (inference returns
-    random Q-values so the agent still runs, just untrained).
+    Requires ``torch`` (declared as a package install dependency).  If PyTorch
+    is not installed the network will not be built and all methods return random
+    or no-op results so that unit tests can run without the full ML stack.
     """
 
     def __init__(self, input_dim: int, hidden_size: int, n_actions: int) -> None:
@@ -485,10 +486,13 @@ class RLTradingAgent:
         .. note::
             Training uses only the primary timeframe (``config.timeframes[0]``)
             for state construction.  Secondary timeframes in *ohlcv_by_tf* are
-            ignored during training because their integer indices do not
-            correspond to the same timestamps as the primary timeframe.
-            Multi-timeframe state vectors are only meaningful at inference time
-            when the caller provides pre-aligned DataFrames.
+            **zero-filled** during training (via :meth:`_aligned_tfs`) because
+            their integer indices do not correspond to the same timestamps as
+            the primary timeframe.  This means the network trains on constant-
+            zero features for secondary TFs and should not be expected to
+            generalise multi-timeframe patterns; secondary TFs are only
+            meaningful at inference time when the caller provides real,
+            pre-aligned DataFrames.
 
         Parameters
         ----------
@@ -505,6 +509,11 @@ class RLTradingAgent:
             self (for chaining).
         """
         # Use the shortest timeframe as the step driver
+        if not self._cfg.timeframes:
+            raise ValueError(
+                "RLTradingAgent.fit() requires at least one entry in "
+                "RLConfig.timeframes.  The primary timeframe is timeframes[0]."
+            )
         primary_tf = self._cfg.timeframes[0]
         primary = ohlcv_by_tf.get(primary_tf)
         if primary is None or len(primary) < self._cfg.lookback_bars + 1:
