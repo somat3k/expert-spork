@@ -650,13 +650,15 @@ class RLTradingAgent:
 
     def load_checkpoint(self, db: Optional[HyperparamDB] = None) -> None:
         """
-        Restore model weights and hyperparameters from the database.
+        Restore model weights and runtime-tunable hyperparameters from the database.
 
         Raises
         ------
         ValueError
             If the saved network architecture (``input_dim`` or
             ``hidden_size``) does not match the current agent's configuration.
+            Structural hyperparameters (for example ``lookback_bars``,
+            ``hidden_size``, ``timeframes``) are not refreshed here.
 
         Parameters
         ----------
