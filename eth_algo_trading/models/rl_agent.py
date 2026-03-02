@@ -514,7 +514,13 @@ class RLTradingAgent:
                 "RLTradingAgent.fit() requires at least one entry in "
                 "RLConfig.timeframes.  The primary timeframe is timeframes[0]."
             )
-        primary_tf = self._cfg.timeframes[0]
+        timeframes = getattr(self._cfg, "timeframes", None)
+        if not isinstance(timeframes, (list, tuple)) or len(timeframes) == 0:
+            raise ValueError(
+                "RLTradingAgent.fit() requires RLConfig.timeframes to be a non-empty "
+                "list/tuple. The primary timeframe is taken as timeframes[0]."
+            )
+        primary_tf = timeframes[0]
         primary = ohlcv_by_tf.get(primary_tf)
         if primary is None or len(primary) < self._cfg.lookback_bars + 1:
             return self
